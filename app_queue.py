@@ -9,7 +9,6 @@ import torch
 import asyncio
 import uvicorn
 import io
-import base64
 from queue_service import AsyncQueueService, TaskStatus
 
 app = FastAPI(title="YOLOv8 隊列檢測服務", version="1.0.0")
@@ -361,34 +360,6 @@ async def predict_with_image(file: UploadFile = File(...)):
             media_type="image/jpeg",
             headers={"Content-Disposition": "inline; filename=detection_result.jpg"}
         )
-        
-    except Exception as e:
-        print(f"圖片檢測錯誤: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/predict-image-with-json")
-async def predict_with_image_and_json(file: UploadFile = File(...)):
-    """同步預測端點 - 返回檢測結果 JSON 和帶框圖片的 base64"""
-    if not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="需要圖片檔")
-    
-    try:
-        # 讀取圖片數據
-        contents = await file.read()
-        
-        # 直接執行檢測
-        result = await asyncio.get_event_loop().run_in_executor(
-            None, run_detection_with_image_sync, contents
-        )
-        
-        # 將圖片轉換為 base64
-        image_base64 = base64.b64encode(result["image_with_boxes"]).decode('utf-8')
-        
-        return {
-            "success": True,
-            "detections": result["detections"],
-            "image_with_boxes_base64": f"data:image/jpeg;base64,{image_base64}"
-        }
         
     except Exception as e:
         print(f"圖片檢測錯誤: {str(e)}")

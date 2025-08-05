@@ -9,7 +9,6 @@
 * 上傳圖片，返回任務 ID
 * 透過任務 ID 查詢辨識結果
 * **🆕 返回帶有檢測框的圖片**
-* **🆕 同時返回 JSON 結果和帶框圖片**
 * 支援 CPU/GPU 推論
 * Docker 容器化部署
 * 可搭配 ngrok 讓手機 APP 呼叫外網 API
@@ -48,7 +47,6 @@ ngrok http http://localhost:8000
 
 ### 🆕 新增圖片 API
 * POST `/predict-image`：上傳圖片，**直接返回帶有檢測框的圖片**
-* POST `/predict-image-with-json`：上傳圖片，返回 **JSON 檢測結果 + base64 編碼的帶框圖片**
 
 更多 API 功能和詳細說明，請參考: `你的-ngrok網址/docs`
 
@@ -67,17 +65,7 @@ curl -X POST "http://localhost:8000/predict-image" \
      --output detection_result.jpg
 ```
 
-### 2. 獲取 JSON 結果 + 帶框圖片
-
-```bash
-# 上傳圖片，獲得 JSON 格式的檢測結果和 base64 編碼的帶框圖片
-curl -X POST "http://localhost:8000/predict-image-with-json" \
-     -H "accept: application/json" \
-     -H "Content-Type: multipart/form-data" \
-     -F "file=@your_image.jpg"
-```
-
-### 3. 使用 Python 測試
+### 2. 使用 Python 測試
 
 ```python
 import requests
@@ -100,8 +88,7 @@ with open('test_image.jpg', 'rb') as f:
 APP 可以選擇使用不同的 API 端點：
 
 1. **原有方式**：使用 `/predict` + `/task/{task_id}` 進行異步檢測
-2. **🆕 新方式**：使用 `/predict-image-with-json` 同步獲取檢測結果和帶框圖片
-3. **🆕 圖片展示**：使用 `/predict-image` 直接獲取帶框圖片進行顯示
+2. **🆕 新方式**：使用 `/predict-image` 直接獲取帶框圖片進行顯示
 
 ---
 
