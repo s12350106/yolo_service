@@ -1,5 +1,5 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ultralytics import YOLO
 import cv2
@@ -8,6 +8,7 @@ import time
 import torch
 import asyncio
 import uvicorn
+import io
 from queue_service import AsyncQueueService, TaskStatus
 
 app = FastAPI(title="YOLOv8 隊列檢測服務", version="1.0.0")
@@ -35,8 +36,115 @@ def resize_if_needed(img, max_dim=640):
         return cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
     return img
 
+def draw_detections(img, detections):
+    """在圖片上繪製檢測框"""
+    img_with_boxes = img.copy()
+    
+    for detection in detections:
+        box = detection["box"]
+        confidence = detection["confidence"]
+        label = detection["label"]
+        
+        # 繪製邊界框
+        cv2.rectangle(img_with_boxes, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2)
+        
+        # 準備標籤文字
+        label_text = f"{label}: {confidence:.2f}"
+        
+        # 計算文字大小
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.6
+        thickness = 2
+        (text_width, text_height), baseline = cv2.getTextSize(label_text, font, font_scale, thickness)
+        
+        # 繪製標籤背景
+        cv2.rectangle(img_with_boxes, 
+                     (box[0], box[1] - text_height - baseline - 5),
+                     (box[0] + text_width, box[1]),
+                     (0, 255, 0), -1)
+        
+        # 繪製標籤文字
+        cv2.putText(img_with_boxes, label_text,
+                   (box[0], box[1] - baseline - 5),
+                   font, font_scale, (0, 0, 0), thickness)
+    
+    return img_with_boxes
+
+def run_detection_with_image_sync(image_data: bytes):
+    """同步檢測函數，返回檢測結果和帶框的圖片"""
+    try:
+        # 解碼圖片
+        arr = np.frombuffer(image_data, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        
+        if img is None:
+            raise Exception("無法解碼圖片")
+
+        start = time.time()
+        
+        # 圖片預處理
+        img_small = resize_if_needed(img, max_dim=640)
+        after_resize = time.time()
+        
+        # 模型推理
+        with torch.inference_mode():
+            results = model.predict(
+                source=img_small, 
+                save=False, 
+                verbose=False,
+                stream=False,
+                device=device,
+                half=False,
+                augment=False,
+                agnostic_nms=True,
+                max_det=300,
+                conf=0.25,
+                iou=0.45,
+            )[0]
+        
+        after_infer = time.time()
+
+        # 處理結果
+        detections = []
+        if results.boxes is not None and len(results.boxes) > 0:
+            boxes = results.boxes.xyxy.cpu().numpy().astype(int)
+            confs = results.boxes.conf.cpu().numpy() if results.boxes.conf is not None else []
+            classes = results.boxes.cls.cpu().numpy().astype(int) if results.boxes.cls is not None else []
+            
+            for i, box in enumerate(boxes):
+                conf = float(confs[i]) if i < len(confs) else 0.0
+                cls_id = int(classes[i]) if i < len(classes) else -1
+                label = model.names.get(cls_id, str(cls_id))
+                
+                detections.append({
+                    "box": box.tolist(),
+                    "confidence": conf,
+                    "class_id": cls_id,
+                    "label": label,
+                })
+        
+        # 在圖片上繪製檢測框
+        img_with_boxes = draw_detections(img_small, detections)
+        
+        # 將圖片編碼為 JPEG
+        _, buffer = cv2.imencode('.jpg', img_with_boxes)
+        img_bytes = buffer.tobytes()
+        
+        end = time.time()
+        print(f"[detection_with_image] resize: {after_resize - start:.3f}s, infer: {after_infer - after_resize:.3f}s, total: {end - start:.3f}s, detections: {len(detections)}")
+        
+        return {
+            "success": True, 
+            "detections": detections,
+            "image_with_boxes": img_bytes
+        }
+        
+    except Exception as e:
+        print(f"檢測錯誤: {str(e)}")
+        raise e
+
 def run_detection_sync(image_data: bytes):
-    """同步檢測函數（供隊列工作者使用）"""
+    """同步檢測函數（供隊列工作者使用，只返回 JSON）"""
     try:
         # 解碼圖片
         arr = np.frombuffer(image_data, dtype=np.uint8)
@@ -230,6 +338,32 @@ async def predict_sync(file: UploadFile = File(...)):
 async def get_queue_info():
     """獲取隊列狀態信息"""
     return await queue_service.get_queue_info()
+
+@app.post("/predict-image")
+async def predict_with_image(file: UploadFile = File(...)):
+    """同步預測端點 - 返回帶有檢測框的圖片"""
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="需要圖片檔")
+    
+    try:
+        # 讀取圖片數據
+        contents = await file.read()
+        
+        # 直接執行檢測（不使用隊列，因為需要返回圖片）
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, run_detection_with_image_sync, contents
+        )
+        
+        # 返回帶框的圖片
+        return StreamingResponse(
+            io.BytesIO(result["image_with_boxes"]),
+            media_type="image/jpeg",
+            headers={"Content-Disposition": "inline; filename=detection_result.jpg"}
+        )
+        
+    except Exception as e:
+        print(f"圖片檢測錯誤: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     print("啟動 YOLOv8 隊列檢測服務...")
