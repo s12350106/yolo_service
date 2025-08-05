@@ -7,7 +7,8 @@
 ## 功能
 
 * 上傳圖片，返回任務 ID
-* 透過任務 ID 查詢辨識結果
+* 透過任務 ID 查詢辨識結果 (JSON格式)
+* **新功能**: 透過任務 ID 獲取帶檢測框的圖片
 * 支援 CPU/GPU 推論
 * Docker 容器化部署
 * 可搭配 ngrok 讓手機 APP 呼叫外網 API
@@ -40,13 +41,21 @@ ngrok http http://localhost:8000
 4. **API 簡介**
 
 * POST `/predict`：上傳圖片，回傳任務 ID
-* GET `/task/{task_id}`：查詢辨識結果
+* GET `/task/{task_id}`：查詢辨識結果 (JSON格式)
+* **GET `/task/{task_id}/image`：獲取帶檢測框的圖片 (JPEG格式)**
 * 更多 API 功能和詳細說明，請參考: `你的-ngrok網址/docs`
 ---
 
 ## Android APP
 
-APP 會用 ngrok URL 呼叫 `/predict` 上傳圖片，拿到任務 ID 後，持續查 `/task/{task_id}` 獲得辨識結果。
+APP 會用 ngrok URL 呼叫 `/predict` 上傳圖片，拿到任務 ID 後：
+
+1. 查詢 `/task/{task_id}` 獲得辨識結果 (JSON格式，包含檢測框座標、信心度等)
+2. **獲取 `/task/{task_id}/image` 下載帶檢測框的圖片**
+
+這樣你的手機端就可以同時獲得：
+- 結構化的檢測數據 (JSON)
+- 視覺化的檢測結果 (帶框圖片)
 
 ---
 
